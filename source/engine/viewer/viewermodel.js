@@ -64,6 +64,16 @@ export class ViewerModel
         this.rootObject.add (object);
     }
 
+    // Removes and disposes one direct child of the root object.
+    RemoveObject (object)
+    {
+        if (this.rootObject === null || object.parent !== this.rootObject) {
+            return;
+        }
+        this.rootObject.remove (object);
+        DisposeThreeObjects (object);
+    }
+
     Traverse (enumerator)
     {
         if (this.rootObject === null) {

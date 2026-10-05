@@ -440,6 +440,13 @@ export class Viewer
         this.Render ();
     }
 
+    // Removes a single extra object, unlike ClearExtra that removes all of them.
+    RemoveExtraObject (object)
+    {
+        this.extraModel.RemoveObject (object);
+        this.Render ();
+    }
+
     ClearExtra ()
     {
         this.extraModel.Clear ();

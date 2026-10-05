@@ -23,6 +23,8 @@ import { GetDefaultMaterials, ReplaceDefaultMaterialsColor } from '../engine/mod
 import { Direction } from '../engine/geometry/geometry.js';
 import { CookieGetBoolVal, CookieSetBoolVal } from './cookiehandler.js';
 import { MeasureTool } from './measuretool.js';
+import { CuspTool, GetModelUpDirection, SplitModelIntoArches } from './cusptool.js';
+import { ConvertModelToThreeObject, ModelToThreeConversionOutput, ModelToThreeConversionParams } from '../engine/threejs/threeconverter.js';
 import { CloseAllDialogs } from './dialog.js';
 import { CreateVerticalSplitter } from './splitter.js';
 import { EnumeratePlugins, PluginType } from './pluginregistry.js';
@@ -188,6 +190,7 @@ export class Website
         this.cameraSettings = new CameraSettings ();
         this.viewer = new Viewer ();
         this.measureTool = new MeasureTool (this.viewer, this.settings);
+        this.cuspTool = new CuspTool (this.viewer);
         this.hashHandler = new HashHandler ();
         this.toolbar = new Toolbar (this.parameters.toolbarDiv);
         this.navigator = new Navigator (this.parameters.navigatorDiv);
@@ -198,6 +201,8 @@ export class Website
         this.uiState = WebsiteUIState.Undefined;
         this.layouter = new WebsiteLayouter (this.parameters, this.navigator, this.sidebar, this.viewer, this.measureTool);
         this.model = null;
+        // the displayed three.js object, needed by the cusp tool to place markers and grids
+        this.mainThreeObject = null;
     }
 
     Load ()
@@ -289,17 +294,62 @@ export class Website
         this.sidebar.Clear ();
 
         this.measureTool.SetActive (false);
+        this.cuspTool.SetGridActive (false, null, null);
     }
 
     OnModelLoaded (importResult, threeObject)
     {
         this.model = importResult.model;
+        this.importResult = importResult;
+        // the arch split is done again for every newly loaded model
+        this.archesSplit = false;
+        this.mainThreeObject = threeObject;
         this.parameters.fileNameDiv.innerHTML = importResult.mainFile;
         this.viewer.SetMainObject (threeObject);
         this.viewer.SetUpVector (Direction.Y, false);
         this.navigator.FillTree (importResult);
         this.sidebar.UpdateControlsVisibility ();
         this.FitModelToWindow (true);
+    }
+
+    // Splits the model into arch meshes once; the callback runs also when the model cannot be split.
+    SplitArches (onDone)
+    {
+        if (this.model === null || this.mainThreeObject === null) {
+            return;
+        }
+        if (this.archesSplit) {
+            onDone ();
+            return;
+        }
+        let up = GetModelUpDirection (this.viewer, this.mainThreeObject);
+        let splitModel = SplitModelIntoArches (this.model, up);
+        if (splitModel === null) {
+            onDone ();
+            return;
+        }
+        let rotation = this.mainThreeObject.quaternion.clone ();
+        let params = new ModelToThreeConversionParams ();
+        ConvertModelToThreeObject (splitModel, params, new ModelToThreeConversionOutput (), {
+            onTextureLoaded : () => {
+                this.viewer.Render ();
+            },
+            onModelLoaded : (threeObject) => {
+                // keep the orientation of the old object, so the view does not jump
+                threeObject.quaternion.copy (rotation);
+                this.archesSplit = true;
+                this.cuspTool.SetArchFilter (true);
+                this.model = splitModel;
+                // the navigator reads the model from the import result: a copy points it to the split model
+                this.importResult = Object.assign (Object.create (Object.getPrototypeOf (this.importResult)), this.importResult, { model : splitModel });
+                this.mainThreeObject = threeObject;
+                this.viewer.SetMainObject (threeObject);
+                this.navigator.Clear ();
+                this.navigator.FillTree (this.importResult);
+                this.sidebar.UpdateControlsVisibility ();
+                onDone ();
+            }
+        });
     }
 
     OnModelClicked (button, mouseCoordinates)
@@ -460,6 +510,12 @@ export class Website
     UpdateMeshesSelection ()
     {
         let selectedMeshId = this.navigator.GetSelectedMeshId ();
+        // the selected mesh name is the arch name: the cusp tool shows only the grid of that arch
+        let selectedArch = null;
+        if (selectedMeshId !== null) {
+            selectedArch = this.model.GetMeshInstance (selectedMeshId).GetMesh ().GetName ();
+        }
+        this.cuspTool.SetSelectedArch (selectedArch);
         this.viewer.SetMeshesHighlight (this.highlightColor, (meshUserData) => {
             if (selectedMeshId !== null && meshUserData.originalMeshInstance.id.IsEqual (selectedMeshId)) {
                 return true;
@@ -707,6 +763,22 @@ export class Website
             this.measureTool.SetActive (isSelected);
         });
         this.measureTool.SetButton (measureToolButton);
+        // the grid button first splits the arches (once), then detects the cusps and draws the grids
+        let gridToolButton = AddPushButton (this.toolbar, 'flat_list', Loc ('Detect cusps, split the arches and align the reference grids (uses the current up vector as occlusal direction)'), ['only_full_width', 'only_on_model'], (isSelected) => {
+            if (!isSelected) {
+                this.cuspTool.SetGridActive (false, this.model, this.mainThreeObject);
+                return;
+            }
+            this.SplitArches (() => {
+                this.cuspTool.SetGridActive (true, this.model, this.mainThreeObject);
+            });
+        });
+        this.cuspTool.SetGridButton (gridToolButton);
+        // visible only while the grid is on (see CuspTool.Update)
+        let cuspsToggleButton = AddPushButton (this.toolbar, 'isolate', Loc ('Show/hide cusps'), ['only_full_width', 'only_on_model'], (isSelected) => {
+            this.cuspTool.SetCuspsVisible (isSelected);
+        });
+        this.cuspTool.SetCuspsButton (cuspsToggleButton);
         AddSeparator (this.toolbar, ['only_full_width', 'only_on_model']);
         AddButton (this.toolbar, 'download', Loc ('Download'), ['only_full_width', 'only_on_model'], () => {
             HandleEvent ('model_downloaded', '');

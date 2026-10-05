@@ -44,6 +44,12 @@ export class ToolbarButton
         this.buttonImg.classList.remove (className);
     }
 
+    // Hides or shows the button without changing its selected state.
+    Show (show)
+    {
+        this.buttonDiv.style.display = show ? '' : 'none';
+    }
+
     IsSelected ()
     {
         return this.selected;

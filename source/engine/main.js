@@ -47,6 +47,7 @@ import { LoadExternalLibraryFromUrl } from './io/externallibs.js';
 import { GetFileName, GetFileExtension, RequestUrl, ReadFile, TransformFileHostUrls, IsUrl, FileSource, FileFormat } from './io/fileutils.js';
 import { TextWriter } from './io/textwriter.js';
 import { RGBColor, RGBAColor, ColorComponentFromFloat, ColorComponentToFloat, RGBColorFromFloatComponents, SRGBToLinear, LinearToSRGB, IntegerToHexString, RGBColorToHexString, RGBAColorToHexString, HexStringToRGBColor, HexStringToRGBAColor, ArrayToRGBColor, RGBColorIsEqual } from './model/color.js';
+import { Cusp, CuspDetectionOptions, DetectCusps } from './model/cuspdetection.js';
 import { GeneratorParams, Generator, GeneratorHelper, GenerateCuboid, GenerateCone, GenerateCylinder, GenerateSphere, GeneratePlatonicSolid } from './model/generator.js';
 import { Line } from './model/line.js';
 import { TextureMap, MaterialBase, FaceMaterial, PhongMaterial, PhysicalMaterial, TextureMapIsEqual, TextureIsEqual, MaterialType, MaterialSource } from './model/material.js';
@@ -61,9 +62,11 @@ import { Node } from './model/node.js';
 import { Object3D, ModelObject3D } from './model/object.js';
 import { Property, PropertyGroup, PropertyToString, PropertyType } from './model/property.js';
 import { GetTriangleArea, GetTetrahedronSignedVolume, CalculateVolume, CalculateSurfaceArea } from './model/quantities.js';
+import { ToothSegmentationOptions, SegmentTeeth } from './model/toothsegmentation.js';
 import { TopologyVertex, TopologyEdge, TopologyTriangleEdge, TopologyTriangle, Topology } from './model/topology.js';
 import { Triangle } from './model/triangle.js';
 import { Unit } from './model/unit.js';
+import { GetWeldedMesh } from './model/weldedmesh.js';
 import { ParameterListBuilder, ParameterListParser, CreateUrlBuilder, CreateUrlParser, CreateModelUrlParameters, ParameterConverter } from './parameters/parameterlist.js';
 import { ModelToThreeConversionParams, ModelToThreeConversionOutput, ThreeConversionStateHandler, ThreeNodeTree, ThreeMaterialHandler, ThreeMeshMaterialHandler, ConvertModelToThreeObject, MaterialGeometryType } from './threejs/threeconverter.js';
 import { ThreeModelLoader } from './threejs/threemodelloader.js';
@@ -230,6 +233,9 @@ export {
     HexStringToRGBAColor,
     ArrayToRGBColor,
     RGBColorIsEqual,
+    Cusp,
+    CuspDetectionOptions,
+    DetectCusps,
     GeneratorParams,
     Generator,
     GeneratorHelper,
@@ -278,6 +284,8 @@ export {
     GetTetrahedronSignedVolume,
     CalculateVolume,
     CalculateSurfaceArea,
+    ToothSegmentationOptions,
+    SegmentTeeth,
     TopologyVertex,
     TopologyEdge,
     TopologyTriangleEdge,
@@ -285,6 +293,7 @@ export {
     Topology,
     Triangle,
     Unit,
+    GetWeldedMesh,
     ParameterListBuilder,
     ParameterListParser,
     CreateUrlBuilder,

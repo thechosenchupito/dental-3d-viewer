@@ -103,6 +103,7 @@ export class MeasureTool
         this.isActive = false;
         this.markers = [];
         this.tempMarker = null;
+        this.extraObjects = [];
 
         this.panel = null;
         this.button = null;
@@ -178,7 +179,7 @@ export class MeasureTool
             let material = CreateMaterial ();
             let aPoint = this.markers[0].GetIntersection ().point;
             let bPoint = this.markers[1].GetIntersection ().point;
-            this.viewer.AddExtraObject (CreateLineFromPoints ([aPoint, bPoint], material));
+            this.AddExtraObject (CreateLineFromPoints ([aPoint, bPoint], material));
         }
     }
 
@@ -190,7 +191,7 @@ export class MeasureTool
 
         let radius = boundingSphere.radius / 20.0;
         let marker = new Marker (intersection, radius);
-        this.viewer.AddExtraObject (marker.GetObject ());
+        this.AddExtraObject (marker.GetObject ());
         return marker;
     }
 
@@ -266,9 +267,19 @@ export class MeasureTool
         this.panel.style.top = (canvasRect.top + 10) + 'px';
     }
 
+    // only the objects of this tool are removed, other tools share the extra model of the viewer
+    AddExtraObject (object)
+    {
+        this.extraObjects.push (object);
+        this.viewer.AddExtraObject (object);
+    }
+
     ClearMarkers ()
     {
-        this.viewer.ClearExtra ();
+        for (let object of this.extraObjects) {
+            this.viewer.RemoveExtraObject (object);
+        }
+        this.extraObjects = [];
         this.markers = [];
         this.tempMarker = null;
     }
