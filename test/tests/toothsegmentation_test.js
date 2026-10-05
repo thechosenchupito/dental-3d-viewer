@@ -62,6 +62,19 @@ describe ('Tooth Segmentation', function () {
             done ();
         });
     });
+
+    it ('Dense single arch scan', function (done) {
+        ImportFile (new OV.ImporterStl (), 'dental/human_lower_jaw/092226-PLOZZA AYLIN', 'lower.stl', (model) => {
+            let segments = OV.SegmentTeeth (model);
+            let total = 0;
+            for (let segment of segments) {
+                total += segment.TriangleCount ();
+            }
+            assert.strictEqual (total, model.TriangleCount ());
+            assert.ok (segments.length >= 10 && segments.length <= 20);
+            done ();
+        });
+    });
 });
 
 }

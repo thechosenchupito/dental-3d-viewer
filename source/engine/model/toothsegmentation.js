@@ -1,4 +1,5 @@
-import { Coord3D, CrossVector3D, DotVector3D, SubCoord3D } from '../geometry/coord3d.js';
+import { Coord3D, CoordDistance3D, CrossVector3D, DotVector3D, SubCoord3D } from '../geometry/coord3d.js';
+import { GetBoundingBox } from './modelutils.js';
 import { Mesh } from './mesh.js';
 import { Triangle } from './triangle.js';
 import { GetWeldedMesh } from './weldedmesh.js';
@@ -11,6 +12,11 @@ export class ToothSegmentationOptions
         this.concavityThreshold = 0.1;
         // number of smoothing passes applied to the concavity values to suppress scan noise
         this.smoothingIterations = 3;
+        // radius (relative to the bounding box diagonal) of the neighborhood used to measure the concavity: on dense
+        // scans the immediate neighbors are too close to see the grooves, so the radius grows with the resolution
+        this.relativeRadius = 0.012;
+        // concavity threshold used instead of concavityThreshold when the neighborhood radius is used
+        this.denseConcavityThreshold = 0.0;
         // regions smaller than this fraction of the vertices are merged into the neighboring region
         this.minRelativeSize = 0.01;
     }
@@ -37,7 +43,7 @@ function GetVertexNormals (vertices, triangles)
 }
 
 // Positive values mean concave (neighbors lie on the outer side of the surface).
-function GetConcavity (vertices, neighbors, triangles, smoothingIterations)
+function GetConcavity (vertices, neighbors, triangles, smoothingIterations, radius)
 {
     let normals = GetVertexNormals (vertices, triangles);
     let edgeLengthSum = 0.0;
@@ -61,6 +67,36 @@ function GetConcavity (vertices, neighbors, triangles, smoothingIterations)
     }
 
     let meanEdgeLength = edgeCount > 0 ? edgeLengthSum / edgeCount : 1.0;
+    let meanEdgeLength0 = meanEdgeLength;
+    if (radius > 1.5 * meanEdgeLength) {
+        // dense mesh: the center is the mean of all the vertices reachable within the radius
+        let stamps = new Int32Array (vertices.length).fill (-1);
+        for (let i = 0; i < vertices.length; i++) {
+            let sum = new Coord3D (0.0, 0.0, 0.0);
+            let queue = [i];
+            stamps[i] = i;
+            for (let q = 0; q < queue.length; q++) {
+                for (let neighborIndex of neighbors[queue[q]]) {
+                    if (stamps[neighborIndex] === i) {
+                        continue;
+                    }
+                    stamps[neighborIndex] = i;
+                    let neighbor = vertices[neighborIndex];
+                    if (SubCoord3D (neighbor, vertices[i]).Length () <= radius) {
+                        queue.push (neighborIndex);
+                        sum.x += neighbor.x;
+                        sum.y += neighbor.y;
+                        sum.z += neighbor.z;
+                    }
+                }
+            }
+            if (queue.length > 1) {
+                sum.MultiplyScalar (1.0 / (queue.length - 1));
+                concavity[i] = DotVector3D (SubCoord3D (sum, vertices[i]), normals[i]);
+            }
+        }
+        meanEdgeLength = radius;
+    }
     for (let i = 0; i < concavity.length; i++) {
         concavity[i] /= meanEdgeLength;
     }
@@ -76,7 +112,7 @@ function GetConcavity (vertices, neighbors, triangles, smoothingIterations)
         }
         concavity = smoothed;
     }
-    return concavity;
+    return { concavity, isDense : radius > 1.5 * meanEdgeLength0 };
 }
 
 function GetConnectedRegions (candidate, neighbors)
@@ -133,8 +169,11 @@ export function SegmentTeeth (object3D, options)
         return [];
     }
 
-    let concavity = GetConcavity (vertices, neighbors, triangles, opts.smoothingIterations);
-    let isConvex = concavity.map ((value) => value <= opts.concavityThreshold);
+    let boundingBox = GetBoundingBox (object3D);
+    let radius = opts.relativeRadius * CoordDistance3D (boundingBox.GetMin (), boundingBox.GetMax ());
+    let { concavity, isDense } = GetConcavity (vertices, neighbors, triangles, opts.smoothingIterations, radius);
+    let threshold = isDense ? opts.denseConcavityThreshold : opts.concavityThreshold;
+    let isConvex = concavity.map ((value) => value <= threshold);
     let { labels, regions } = GetConnectedRegions (isConvex, neighbors);
 
     let minSize = Math.max (1, Math.floor (opts.minRelativeSize * vertices.length));

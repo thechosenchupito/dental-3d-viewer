@@ -1,4 +1,4 @@
-import { DetectCusps } from '../engine/model/cuspdetection.js';
+﻿import { DetectCusps } from '../engine/model/cuspdetection.js';
 import { SegmentTeeth } from '../engine/model/toothsegmentation.js';
 import { GetBoundingBox } from '../engine/model/modelutils.js';
 import { GetWeldedMesh } from '../engine/model/weldedmesh.js';
@@ -63,7 +63,7 @@ function GetToothLikeSegments (segments)
         return CoordDistance3D (box.GetMin (), box.GetMax ());
     });
     let median = Array.from (sizes).sort ((a, b) => a - b)[Math.floor (sizes.length / 2)];
-    let sized = segments.filter ((_, index) => sizes[index] >= 0.4 * median && sizes[index] <= 1.8 * median);
+    let sized = segments.filter ((_, index) => sizes[index] >= 0.4 * median && sizes[index] <= 2.5 * median);
     // teeth sit in an arch: drop fragments that are not close to at least two other segments
     let centers = sized.map ((segment) => {
         let box = GetBoundingBox (segment);
@@ -73,6 +73,69 @@ function GetToothLikeSegments (segments)
         let near = centers.filter ((center, other) => other !== index && CoordDistance3D (center, centers[index]) <= 2.0 * median);
         return near.length >= 2;
     });
+}
+
+// The gum segment (the biggest one, not a tooth) may contain teeth fused with it. Its cusps are kept only when they
+// lie at the crown height reached by the cusps of the separated teeth, so palate and gum peaks are discarded.
+function GetGumCusps (segments, teeth, toothCusps, directions)
+{
+    // without reference teeth there is no crown height to compare with
+    if (teeth.length === 0 || toothCusps.length === 0) {
+        return [];
+    }
+    // size of a segment: diagonal of its bounding box
+    let diagonal = (segment) => {
+        let box = GetBoundingBox (segment);
+        return CoordDistance3D (box.GetMin (), box.GetMax ());
+    };
+    // the gum is the biggest segment that was not accepted as a tooth
+    let gum = null;
+    for (let segment of segments) {
+        if (!teeth.includes (segment) && (gum === null || diagonal (segment) > diagonal (gum))) {
+            gum = segment;
+        }
+    }
+    if (gum === null) {
+        return [];
+    }
+    // median tooth size: used as a length unit for the tolerances below
+    let sizes = teeth.map (diagonal).sort ((a, b) => a - b);
+    let median = sizes[Math.floor (sizes.length / 2)];
+    // tooth centers, used to assign each recovered cusp to an arch
+    let centers = teeth.map ((tooth) => {
+        let box = GetBoundingBox (tooth);
+        return new Coord3D ((box.GetMin ().x + box.GetMax ().x) / 2.0, (box.GetMin ().y + box.GetMax ().y) / 2.0, (box.GetMin ().z + box.GetMax ().z) / 2.0);
+    });
+    let result = [];
+    for (let direction of new Set (directions)) {
+        // highest cusp of the separated teeth of this arch along its occlusal direction
+        let tip = Math.max (...toothCusps.filter ((cusp) => cusp.direction === direction).map ((cusp) => DotVector3D (cusp.position, direction)));
+        let cusps = DetectCusps (gum, {
+            upDirection : direction,
+            minRelativeProminence : 0.03,
+            minRelativeDistance : 0.15,
+            minRelativeHeight : 0.5,
+            maxCount : maxCuspCount * 4
+        });
+        for (let cusp of cusps) {
+            // too low compared to the real teeth: palate or gum peak, not a cusp
+            if (DotVector3D (cusp.position, direction) < tip - 0.15 * median) {
+                continue;
+            }
+            // each cusp belongs to the arch of the nearest tooth
+            let nearest = 0;
+            for (let i = 1; i < centers.length; i++) {
+                if (CoordDistance3D (centers[i], cusp.position) < CoordDistance3D (centers[nearest], cusp.position)) {
+                    nearest = i;
+                }
+            }
+            // the gum holds both arches: keep only the cusps of the arch being processed
+            if (directions[nearest] === direction) {
+                result.push ({ position : cusp.position, direction : direction });
+            }
+        }
+    }
+    return result;
 }
 
 // With both arches visible the lower teeth chew upwards and the upper ones downwards: the arches are split at the
@@ -91,7 +154,9 @@ function FindArchSplit (teeth, up)
     let sorted = Array.from (heights).sort ((a, b) => a - b);
     let gap = 0.0;
     let split = 0.0;
-    for (let i = 1; i < sorted.length; i++) {
+    // each arch needs a minimum of teeth, so that isolated misdetected fragments are not taken for an arch
+    let minTeeth = Math.max (3, Math.ceil (0.25 * sorted.length));
+    for (let i = minTeeth; i <= sorted.length - minTeeth; i++) {
         if (sorted[i] - sorted[i - 1] > gap) {
             gap = sorted[i] - sorted[i - 1];
             split = (sorted[i] + sorted[i - 1]) / 2.0;
@@ -110,11 +175,21 @@ function FindArchSplit (teeth, up)
 
 // For every tooth returns the occlusal direction: the up vector for the lower arch, its opposite for the upper
 // arch (whose teeth chew downwards). With a single arch every tooth gets the up vector.
-function GetArchDirections (teeth, up)
+function GetArchDirections (teeth, up, modelHeight)
 {
     let split = FindArchSplit (teeth, up);
     if (split === null) {
-        return teeth.map (() => up);
+        // a single arch: the crowns lie on the side of the model (along the up axis) opposite to the gum base, so
+        // a lone upper arch gets the flipped direction even when the user left the up vector as it was
+        let heights = teeth.map ((tooth) => {
+            let box = GetBoundingBox (tooth);
+            let min = box.GetMin ();
+            let max = box.GetMax ();
+            return DotVector3D (new Coord3D ((min.x + max.x) / 2.0, (min.y + max.y) / 2.0, (min.z + max.z) / 2.0), up);
+        });
+        let meanHeight = heights.reduce ((sum, height) => sum + height, 0.0) / Math.max (1, heights.length);
+        let direction = meanHeight < modelHeight ? new Coord3D (-up.x, -up.y, -up.z) : up;
+        return teeth.map (() => direction);
     }
     let flipped = new Coord3D (-up.x, -up.y, -up.z);
     return teeth.map ((tooth) => {
@@ -453,8 +528,11 @@ export class CuspTool
         let boundingBox = GetBoundingBox (model);
         let radius = 0.004 * CoordDistance3D (boundingBox.GetMin (), boundingBox.GetMax ());
         let globalUp = GetModelUpDirection (this.viewer, mainObject);
-        let teeth = GetToothLikeSegments (SegmentTeeth (model));
-        let directions = GetArchDirections (teeth, globalUp);
+        // all segments are kept: the ones rejected as teeth (gum) may still hide fused molars
+        let segments = SegmentTeeth (model);
+        let teeth = GetToothLikeSegments (segments);
+        let modelCenter = new Coord3D ((boundingBox.GetMin ().x + boundingBox.GetMax ().x) / 2.0, (boundingBox.GetMin ().y + boundingBox.GetMax ().y) / 2.0, (boundingBox.GetMin ().z + boundingBox.GetMax ().z) / 2.0);
+        let directions = GetArchDirections (teeth, globalUp, DotVector3D (modelCenter, globalUp));
 
         let extraObject = new THREE.Object3D ();
         extraObject.quaternion.copy (mainObject.quaternion);
@@ -475,6 +553,7 @@ export class CuspTool
             let material = new THREE.MeshBasicMaterial ({
                 color : 0xe53935
             });
+            let toothCusps = [];
             for (let [index, tooth] of teeth.entries ()) {
                 let cusps = DetectCusps (tooth, {
                     upDirection : GetToothAxis (tooth, directions[index]),
@@ -489,7 +568,17 @@ export class CuspTool
                     marker.position.set (cusp.position.x, cusp.position.y, cusp.position.z);
                     marker.userData.isCusp = true;
                     archGroups.get (directions[index]).add (marker);
+                    // remembered as crown height reference for the gum cusps
+                    toothCusps.push ({ position : cusp.position, direction : directions[index] });
                 }
+            }
+
+            // Distal molars are often fused with the gum segment: its crown-height cusps are recovered too.
+            for (let cusp of GetGumCusps (segments, teeth, toothCusps, directions)) {
+                let marker = new THREE.Mesh (new THREE.SphereGeometry (radius, 16, 12), material);
+                marker.position.set (cusp.position.x, cusp.position.y, cusp.position.z);
+                marker.userData.isCusp = true;
+                archGroups.get (cusp.direction).add (marker);
             }
         }
 

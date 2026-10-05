@@ -21,5 +21,11 @@ Versione inglese: [CHANGELOG.md](./CHANGELOG.md)
 - La scala della griglia considera anche la profondità dell'arcata, così le arcate profonde ci stanno dentro.
 
 ## Corretto
+
+- Filtro dimensione denti ampliato (fino a 2,5x la mediana): i molari grandi non vengono più scartati.
+- I molari distali uniti alla gengiva ora ricevono le cuspidi (vengono recuperate quelle della gengiva all'altezza delle corone).
 - Misura e griglia non interferiscono più: ogni strumento rimuove solo i propri oggetti extra invece di cancellarli tutti.
 - Rotazione dei marker e precisione delle cuspidi (l'arcata superiore non mostra più cuspidi sulle radici).
+- Segmentazione dei denti su scansioni dense: la concavità è misurata su un raggio proporzionale alle dimensioni del modello (`relativeRadius`), così le scansioni reali di singole arcate vengono separate nei denti.
+- La divisione in arcate non si attiva più su una singola arcata con frammenti isolati rilevati male (ogni arcata richiede almeno 3 denti).
+- Una singola arcata superiore ottiene automaticamente la direzione occlusale invertita, così le cuspidi sono rilevate sulle corone e non sulle radici.
